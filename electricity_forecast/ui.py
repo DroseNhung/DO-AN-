@@ -132,10 +132,11 @@ class MainWindow(WorkerMixin):
         train_controls.addWidget(self.train_button)
         train_controls.addStretch()
         training_layout.addLayout(train_controls)
+        self.metrics_table = QTableWidget()
+        self.metrics_table.setMinimumHeight(140)
+        training_layout.addWidget(self.metrics_table, stretch=1)
         self.backtest_figure, self.backtest_canvas = _make_canvas()
         training_layout.addWidget(self.backtest_canvas, stretch=2)
-        self.metrics_table = QTableWidget()
-        training_layout.addWidget(self.metrics_table, stretch=1)
         self.tabs.addTab(training_tab, "Training")
 
         forecast_tab = QWidget()

@@ -284,8 +284,9 @@ def _render(state: WebState) -> str:
       <div><label>Meter</label>{_meter_select("train_meter", meters)}</div>
       <button type="submit">Train / Backtest</button>
     </form>
-    {_backtest_svg(state.backtest_df)}
+    <h3>Metrics</h3>
     {_df_table(state.metrics_df)}
+    {_backtest_svg(state.backtest_df)}
   </section>
   <section>
     <h2>Forecast</h2>

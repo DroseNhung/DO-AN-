@@ -130,10 +130,11 @@ class ElectricityForecastTk:
             controls, text="Train / Backtest", command=self.train
         )
         self.train_button.pack(side="left")
-        self.backtest_chart_frame = ttk.Frame(frame)
-        self.backtest_chart_frame.pack(fill="both", expand=True)
         self.metrics_tree = _tree(frame)
-        self.metrics_tree.pack(fill="both", expand=True, pady=(8, 0))
+        self.metrics_tree.configure(height=6)
+        self.metrics_tree.pack(fill="x", expand=False, pady=(8, 0))
+        self.backtest_chart_frame = ttk.Frame(frame)
+        self.backtest_chart_frame.pack(fill="both", expand=True, pady=(8, 0))
 
     def _build_forecast_tab(self, notebook: ttk.Notebook) -> None:
         frame = ttk.Frame(notebook, padding=12)
