@@ -248,6 +248,7 @@ def _render(state: WebState) -> str:
     section {{ margin-bottom: 22px; }}
     h1 {{ font-size: 22px; margin: 0; }}
     h2 {{ font-size: 17px; margin: 0 0 10px; }}
+    h3 {{ font-size: 14px; margin: 14px 0 6px; }}
     label {{ display: block; font-size: 13px; font-weight: 600; margin: 8px 0 4px; }}
     input, select {{ width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid #c9d1d9; border-radius: 6px; }}
     button, a.button {{ display: inline-block; padding: 8px 12px; border: 1px solid #1f6feb; background: #1f6feb; color: white; border-radius: 6px; text-decoration: none; cursor: pointer; }}
@@ -487,13 +488,36 @@ def _backtest_svg(df) -> str:
     areas = sorted(df["area"].dropna().unique())[:12]
     if not areas:
         return ""
-    model_names = _backtest_model_names(df)
+    model_names = _backtest_model_names(df) or ["LinearRegression"]
     model_colors = _backtest_model_colors(model_names)
+    charts = []
+    for model_name in model_names:
+        model_df = _backtest_model_dataframe(df, model_name)
+        model_areas = [
+            area for area in areas if not model_df[model_df["area"].eq(area)].empty
+        ]
+        if not model_areas:
+            continue
+        charts.append(
+            _backtest_model_svg(
+                model_df,
+                model_name=model_name,
+                areas=model_areas,
+                color=model_colors.get(model_name, "#3158d4"),
+            )
+        )
+    return "".join(charts)
+
+
+def _backtest_model_svg(df, model_name: str, areas: list[str], color: str) -> str:
+    import math
+
     cols = min(3, len(areas))
     rows = math.ceil(len(areas) / cols)
-    cell_w, cell_h = 330, 280
+    cell_w, cell_h = 330, 260
     width, height = cell_w * cols, cell_h * rows
     lines = [
+        f'<h3>{html.escape(_backtest_model_label(model_name))}</h3>',
         f'<svg viewBox="0 0 {width} {height}" style="height:{height}px" role="img">'
     ]
     for idx, area in enumerate(areas):
@@ -511,27 +535,11 @@ def _backtest_svg(df) -> str:
         row = idx // cols
         ox = col * cell_w
         oy = row * cell_h
-        left, top = ox + 48, oy + 52
-        plot_w, plot_h = cell_w - 72, cell_h - 92
+        left, top = ox + 48, oy + 34
+        plot_w, plot_h = cell_w - 72, cell_h - 72
         lines.append(
             f'<text x="{left}" y="{oy + 18}" font-size="13" font-weight="600">{html.escape(str(area))}: Actual vs Predicted</text>'
         )
-        if len(model_names) > 1:
-            group_model_names = set(group["model_name"].astype(str))
-            legend_y = oy + 34
-            legend_x = left
-            for model_name in model_names:
-                if model_name not in group_model_names:
-                    continue
-                color = model_colors.get(model_name, "#3158d4")
-                label = _backtest_model_label(model_name)
-                lines.append(
-                    f'<circle cx="{legend_x}" cy="{legend_y - 4}" r="3" fill="{color}" opacity="0.75"/>'
-                )
-                lines.append(
-                    f'<text x="{legend_x + 8}" y="{legend_y}" font-size="10" fill="{color}">{html.escape(label)}</text>'
-                )
-                legend_x += max(48, len(label) * 6 + 20)
         lines.append(
             f'<line x1="{left}" y1="{top + plot_h}" x2="{left + plot_w}" y2="{top + plot_h}" stroke="#d8dee4"/>'
         )
@@ -541,28 +549,16 @@ def _backtest_svg(df) -> str:
         lines.append(
             f'<line x1="{left}" y1="{top + plot_h}" x2="{left + plot_w}" y2="{top}" stroke="#d55e5e" stroke-dasharray="5 4"/>'
         )
-        if "model_name" in group.columns and len(model_names) > 1:
-            model_labels = group["model_name"].astype(str)
-            point_groups = [
-                (model_name, group[model_labels.eq(model_name)])
-                for model_name in model_names
-            ]
-        else:
-            point_groups = [("LinearRegression", group)]
-        for model_name, model_group in point_groups:
-            if model_group.empty:
-                continue
-            color = model_colors.get(str(model_name), "#3158d4")
-            for _, point in model_group.iterrows():
-                x = left + ((float(point["actual_kwh"]) - min_value) / span) * plot_w
-                y = (
-                    top
-                    + plot_h
-                    - ((float(point["predicted_kwh"]) - min_value) / span) * plot_h
-                )
-                lines.append(
-                    f'<circle cx="{x:.1f}" cy="{y:.1f}" r="2.5" fill="{color}" opacity="0.62"/>'
-                )
+        for _, point in group.iterrows():
+            x = left + ((float(point["actual_kwh"]) - min_value) / span) * plot_w
+            y = (
+                top
+                + plot_h
+                - ((float(point["predicted_kwh"]) - min_value) / span) * plot_h
+            )
+            lines.append(
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="2.5" fill="{color}" opacity="0.65"/>'
+            )
         lines.append(
             f'<text x="{left + plot_w / 2 - 34}" y="{oy + cell_h - 12}" font-size="11">Actual kWh</text>'
         )
@@ -571,6 +567,12 @@ def _backtest_svg(df) -> str:
         )
     lines.append("</svg>")
     return "".join(lines)
+
+
+def _backtest_model_dataframe(df, model_name: str):
+    if df is None or df.empty or "model_name" not in df.columns:
+        return df
+    return df[df["model_name"].astype(str).eq(model_name)]
 
 
 def _backtest_model_names(df) -> list[str]:

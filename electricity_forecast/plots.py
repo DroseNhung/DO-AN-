@@ -13,10 +13,11 @@ def draw_actual_vs_predicted(figure, df) -> None:
     import math
 
     areas = [] if df is None or df.empty else sorted(df["area"].dropna().unique())
-    model_names = _model_names(df)
+    model_names = _model_names(df) or ["LinearRegression"]
     model_colors = _model_color_map(model_names)
     cols = min(3, max(1, len(areas)))
-    rows = max(1, math.ceil(max(len(areas), 1) / cols))
+    area_rows = max(1, math.ceil(max(len(areas), 1) / cols))
+    rows = area_rows * max(1, len(model_names))
     figure.clear()
     axes = figure.subplots(rows, cols, squeeze=False)
     flat_axes = list(axes.ravel())
@@ -30,45 +31,52 @@ def draw_actual_vs_predicted(figure, df) -> None:
             axis.set_visible(False)
         return
 
-    for axis, area in zip(flat_axes, areas):
-        group = df[df["area"].eq(area)]
-        actual = group["actual_kwh"].astype(float)
-        predicted = group["predicted_kwh"].astype(float)
-        min_value = min(float(actual.min()), float(predicted.min()))
-        max_value = max(float(actual.max()), float(predicted.max()))
-        pad = max((max_value - min_value) * 0.08, 1.0)
-        if "model_name" in group.columns and len(model_names) > 1:
-            model_labels = group["model_name"].astype(str)
-            for model_name in model_names:
-                model_group = group[model_labels.eq(model_name)]
-                if model_group.empty:
-                    continue
-                axis.scatter(
-                    model_group["actual_kwh"].astype(float),
-                    model_group["predicted_kwh"].astype(float),
-                    s=14,
-                    color=model_colors.get(str(model_name), "#3158d4"),
-                    alpha=0.62,
-                    label=str(model_name),
-                )
-            axis.legend(loc="upper left", fontsize="x-small")
-        else:
-            axis.scatter(actual, predicted, s=14, color="#3158d4", alpha=0.65)
-        axis.plot(
-            [min_value - pad, max_value + pad],
-            [min_value - pad, max_value + pad],
-            linestyle="--",
-            color="#d55e5e",
-            linewidth=1.3,
-        )
-        axis.set_title(f"{area}: Actual vs Predicted")
-        axis.set_xlabel("Actual kWh")
-        axis.set_ylabel("Predicted kWh")
-        axis.grid(True, alpha=0.2)
-        axis.set_xlim(min_value - pad, max_value + pad)
-        axis.set_ylim(min_value - pad, max_value + pad)
-    for axis in flat_axes[len(areas) :]:
-        axis.set_visible(False)
+    for model_idx, model_name in enumerate(model_names):
+        model_df = _model_dataframe(df, model_name)
+        for area_idx, area in enumerate(areas):
+            axis = axes[model_idx * area_rows + area_idx // cols][area_idx % cols]
+            group = model_df[model_df["area"].eq(area)]
+            if group.empty:
+                axis.set_visible(False)
+                continue
+            _draw_actual_vs_predicted_axis(
+                axis,
+                group,
+                area=area,
+                model_name=model_name,
+                color=model_colors.get(model_name, "#3158d4"),
+            )
+        for area_idx in range(len(areas), area_rows * cols):
+            axis = axes[model_idx * area_rows + area_idx // cols][area_idx % cols]
+            axis.set_visible(False)
+
+
+def _draw_actual_vs_predicted_axis(axis, group, area: str, model_name: str, color: str):
+    actual = group["actual_kwh"].astype(float)
+    predicted = group["predicted_kwh"].astype(float)
+    min_value = min(float(actual.min()), float(predicted.min()))
+    max_value = max(float(actual.max()), float(predicted.max()))
+    pad = max((max_value - min_value) * 0.08, 1.0)
+    axis.scatter(actual, predicted, s=14, color=color, alpha=0.65)
+    axis.plot(
+        [min_value - pad, max_value + pad],
+        [min_value - pad, max_value + pad],
+        linestyle="--",
+        color="#d55e5e",
+        linewidth=1.3,
+    )
+    axis.set_title(f"{_model_label(model_name)} - {area}")
+    axis.set_xlabel("Actual kWh")
+    axis.set_ylabel("Predicted kWh")
+    axis.grid(True, alpha=0.2)
+    axis.set_xlim(min_value - pad, max_value + pad)
+    axis.set_ylim(min_value - pad, max_value + pad)
+
+
+def _model_dataframe(df, model_name: str):
+    if df is None or df.empty or "model_name" not in df.columns:
+        return df
+    return df[df["model_name"].astype(str).eq(model_name)]
 
 
 def _model_names(df) -> list[str]:
@@ -97,10 +105,18 @@ def _model_color_map(model_names: list[str]) -> dict[str, str]:
     return colors
 
 
+def _model_label(model_name: str) -> str:
+    return {
+        "LinearRegression": "Linear",
+        "RidgeRegression": "Ridge",
+    }.get(model_name, model_name)
+
+
 def _actual_vs_predicted_size(df) -> tuple[float, float]:
     import math
 
     areas = [] if df is None or df.empty else sorted(df["area"].dropna().unique())
+    model_count = max(1, len(_model_names(df)))
     cols = min(3, max(1, len(areas)))
-    rows = max(1, math.ceil(max(len(areas), 1) / cols))
-    return 4.4 * cols, 3.4 * rows
+    area_rows = max(1, math.ceil(max(len(areas), 1) / cols))
+    return 4.4 * cols, 3.2 * area_rows * model_count
