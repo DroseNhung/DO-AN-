@@ -77,18 +77,24 @@ def train_models(
             pred = np.clip(pred, 0.0, None)
             mae = float(mean_absolute_error(y_test, pred))
             rmse = float(mean_squared_error(y_test, pred) ** 0.5)
+            mape = _mape_percent(y_test, pred)
             r2 = float(r2_score(y_test, pred)) if len(y_test) > 1 else 0.0
             metrics = MeterModelMetrics(
                 meter=meter,
                 model_name=name,
                 mae=mae,
                 rmse=rmse,
+                mape=mape,
                 r2=r2,
                 rows_train=len(train_df),
                 rows_test=len(test_df),
             )
             metric_rows.append(metrics)
             scored.append((rmse, metrics, name, kind, estimator, pred))
+
+        all_backtest_rows = []
+        for _, _, name, _, _, pred in scored:
+            all_backtest_rows.extend(_backtest_rows(test_df, pred, name))
 
         selection_pool = scored
         if model_policy == "linear":
@@ -156,6 +162,7 @@ def train_models(
                 "backtest_rows": _backtest_rows(
                     test_df, selected_backtest_pred, selected_name
                 ),
+                "backtest_rows_all": all_backtest_rows,
             },
         )
 
@@ -198,7 +205,10 @@ def backtest_predictions_dataframe(models: dict[str, TrainedMeterModel]):
 
     rows = []
     for model in models.values():
-        rows.extend(model.metadata.get("backtest_rows", []))
+        rows.extend(
+            model.metadata.get("backtest_rows_all")
+            or model.metadata.get("backtest_rows", [])
+        )
     columns = [
         "timestamp_local",
         "meter",
@@ -210,8 +220,14 @@ def backtest_predictions_dataframe(models: dict[str, TrainedMeterModel]):
     ]
     if not rows:
         return pd.DataFrame(columns=columns)
-    return pd.DataFrame(rows, columns=columns).sort_values(
-        ["area", "meter", "timestamp_local"]
+    model_order = {"LinearRegression": 0, "SeasonalNaive": 1, "RidgeRegression": 2}
+    result = pd.DataFrame(rows, columns=columns)
+    return (
+        result.assign(
+            _model_order=result["model_name"].map(model_order).fillna(99).astype(int)
+        )
+        .sort_values(["area", "meter", "_model_order", "timestamp_local"])
+        .drop(columns=["_model_order"])
     )
 
 
@@ -246,6 +262,20 @@ def _baseline_predict(X, fallback: float):
         np.isnan(values), float(fallback if fallback == fallback else 0.0), values
     )
     return np.clip(values, 0.0, None)
+
+
+def _mape_percent(actual, predicted) -> float:
+    import numpy as np
+
+    actual = np.asarray(actual, dtype=float)
+    predicted = np.asarray(predicted, dtype=float)
+    denominator = np.abs(actual)
+    valid = denominator > 1e-9
+    if not np.any(valid):
+        return 0.0
+    return float(
+        np.mean(np.abs((actual[valid] - predicted[valid]) / actual[valid])) * 100
+    )
 
 
 def _backtest_rows(test_df, predictions, model_name: str) -> list[dict[str, object]]:

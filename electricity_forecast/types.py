@@ -97,6 +97,7 @@ class MeterModelMetrics:
     model_name: str
     mae: float
     rmse: float
+    mape: float
     r2: float
     rows_train: int
     rows_test: int

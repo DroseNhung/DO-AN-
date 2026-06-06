@@ -65,6 +65,8 @@ def test_train_and_forecast_generates_requested_rows():
         ),
     )
     assert not metrics.empty
+    assert "mape" in metrics.columns
+    assert metrics["mape"].ge(0).all()
     assert len(models) == 2
     assert {model.model_name for model in models.values()} == {"LinearRegression"}
     assert all("vavg" in model.feature_columns for model in models.values())
@@ -74,6 +76,11 @@ def test_train_and_forecast_generates_requested_rows():
     backtest = backtest_predictions_dataframe(models)
     assert not backtest.empty
     assert {"area", "actual_kwh", "predicted_kwh"}.issubset(backtest.columns)
+    assert set(backtest["model_name"].unique()) == {
+        "LinearRegression",
+        "SeasonalNaive",
+        "RidgeRegression",
+    }
 
 
 def test_build_feature_table_uses_only_data2026(tmp_path):

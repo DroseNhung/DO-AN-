@@ -78,6 +78,7 @@ def _make_mock_model(meter="METER_A", area="AREA_A"):
         model_name="LinearRegression",
         mae=0.5,
         rmse=0.6,
+        mape=5.0,
         r2=0.85,
         rows_train=160,
         rows_test=40,
