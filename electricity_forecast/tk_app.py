@@ -6,9 +6,10 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
-
+import joblib
 from .anomaly import detect_anomalies as run_anomaly_detection
 from .data import summarize_paths
+from .database import engine
 from .features import build_feature_table, feature_summary
 from .models import backtest_predictions_dataframe, forecast_dataframe, train_models
 from .optimizer import optimize_consumption
@@ -21,6 +22,8 @@ from .weather import (
     monthly_average_temperature,
     weather_location_labels,
 )
+STATE_PATH = Path.home() / "Downloads" / "electricity_forecast_state.pkl"
+
 
 
 def run_app() -> int:
@@ -76,6 +79,49 @@ class ElectricityForecastTk:
         self._build_anomaly_tab(notebook)
         self._build_optimization_tab(notebook)
         self._build_export_tab(notebook)
+        self._load_state_if_exists()
+    def _save_state(self) -> None:
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+        state = {
+            "feature_table": self.feature_table,
+            "trained_models": self.trained_models,
+            "metrics_df": self.metrics_df,
+            "backtest_df": self.backtest_df,
+        }
+
+        joblib.dump(state, STATE_PATH)
+
+
+    def _load_state_if_exists(self) -> None:
+        if not STATE_PATH.exists():
+            return
+
+        state = joblib.load(STATE_PATH)
+
+        self.feature_table = state.get("feature_table")
+        self.trained_models = state.get("trained_models", {})
+        self.metrics_df = state.get("metrics_df")
+        self.backtest_df = state.get("backtest_df")
+
+        if self.feature_table is not None:
+            self.data_status.configure(text="Loaded from saved state")
+
+            self.data_summary.delete("1.0", "end")
+            self.data_summary.insert(
+                "1.0",
+                f"Loaded saved data from:\n{STATE_PATH}\n\n"
+                f"Meters: {len(self.trained_models)}\n"
+                f"Rows: {len(self.feature_table)}"
+            )
+
+            self._refresh_meters()
+
+        if self.metrics_df is not None:
+            _fill_tree(self.metrics_tree, self.metrics_df)
+
+        if self.backtest_df is not None:
+            self._plot_backtest(self.backtest_df)
 
     def _build_data_tab(self, notebook: ttk.Notebook) -> None:
         frame = ttk.Frame(notebook, padding=12)
@@ -314,8 +360,15 @@ class ElectricityForecastTk:
         def task():
             paths = self._paths()
             summaries = summarize_paths(paths)
+
             features = build_feature_table(paths)
-            return summaries, features, feature_summary(features)
+            summary = feature_summary(features)
+
+            trained_models, metrics_df = train_models(features, meters=None)
+            backtest_df = backtest_predictions_dataframe(trained_models)
+
+            return summaries, features, summary, trained_models, metrics_df, backtest_df
+
 
         self._run_background(task, self._on_imported, self._on_import_failed)
 
@@ -328,7 +381,11 @@ class ElectricityForecastTk:
         def task():
             meter = self.train_meter.get()
             meters = None if meter == "All meters" else [meter]
-            return train_models(self.feature_table, meters=meters)
+            trained_models, metrics_df = train_models(self.feature_table, meters=meters)
+            backtest_df = backtest_predictions_dataframe(trained_models)
+
+            return trained_models, metrics_df, backtest_df
+
 
         self._run_background(task, self._on_trained, self._on_train_failed)
 
@@ -428,18 +485,32 @@ class ElectricityForecastTk:
         self._save_df(self.optimization_df, "optimization")
 
     def _on_imported(self, result) -> None:
-        summaries, features, summary = result
+        summaries, features, summary, trained_models, metrics_df, backtest_df = result
+
         self.feature_table = features
-        self.data_status.configure(text="Loaded")
-        self.import_button.configure(state="normal")
+        self.trained_models = trained_models
+        self.metrics_df = metrics_df
+        self.backtest_df = backtest_df
         self.anomaly_df = None
+
+        self._save_state()
+
+        self.data_status.configure(text=f"Loaded, trained, and saved to {STATE_PATH}")
+        self.import_button.configure(state="normal")
+
         self.data_summary.delete("1.0", "end")
         self.data_summary.insert("1.0", _format_summary(summaries, summary))
+
         self._refresh_meters()
+        _fill_tree(self.metrics_tree, self.metrics_df)
+        self._plot_backtest(self.backtest_df)
+
 
     def _on_trained(self, result) -> None:
-        self.trained_models, self.metrics_df = result
-        self.backtest_df = backtest_predictions_dataframe(self.trained_models)
+        self.trained_models, self.metrics_df, self.backtest_df = result
+
+        self._save_state()
+
         self.train_button.configure(state="normal")
         _fill_tree(self.metrics_tree, self.metrics_df)
         self._plot_backtest(self.backtest_df)
